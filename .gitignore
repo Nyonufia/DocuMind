@@ -1,0 +1,25 @@
+# Environnements virtuels Python
+venv/
+.venv/
+**/venv/
+**/.venv/
+
+# Fichiers Python temporaires
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Variables d'environnement et secrets
+.env
+.env.*
+!.env.example
+
+# Dépendances frontend
+node_modules/
+
+# Fichiers IDE
+.vscode/
+
+# Fichiers système
+.DS_Store
+Thumbs.db
