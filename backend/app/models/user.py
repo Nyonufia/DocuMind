@@ -13,6 +13,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.database import Base
 
 
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -65,6 +67,11 @@ class User(Base):
         default=True,
         nullable=False
     )
+    doit_changer_password: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False,
+        nullable=False
+    )
 
     id_role: Mapped[int] = mapped_column(
         ForeignKey("roles.id_role"),
@@ -74,4 +81,12 @@ class User(Base):
     role: Mapped["Role"] = relationship(
         "Role",
         back_populates="users"
+    )
+
+    # Version de sécurité des jetons JWT.
+    # Permet d'invalider les sessions après un changement de mot de passe.
+    token_version: Mapped[int] = mapped_column(
+        Integer,
+        default=0,
+        nullable=False
     )
