@@ -18,6 +18,7 @@ from app.security.password import hash_password
 from app.security.dependencies import require_password_changed
 
 from app.security.dependencies import require_admin
+from app.services.audit_service import create_audit_event, create_independent_audit_event
 
 router = APIRouter(prefix="/auth", tags=["Authentification"])
 
@@ -33,7 +34,7 @@ def login(
         )
     )
 
-    if user is None or not verify_password(
+    """if user is None or not verify_password(
         form_data.password, user.password_hash
     ):
         raise HTTPException(
@@ -46,16 +47,65 @@ def login(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Ce compte est desactive"
+        )"""
+
+    # Vérifier l'existence du compte et la validité du mot de passe.
+    # Le message d'erreur reste identique pour éviter de révéler
+    # si un nom d'utilisateur existe dans la base de données.
+    if user is None or not verify_password(form_data.password, user.password_hash):
+        # Journaliser la tentative échouée sans conserver le mot de passe.
+        create_independent_audit_event(
+            id_user=user.id_user if user else None,
+            action="LOGIN_FAILURE",
+            module="AUTH",
+            statut="FAILURE",
+            details="Tentative de connexion avec des identifiants incorrects"
         )
 
-    # Générer un JWT associé à la version actuelle du compte.
-    token = create_access_token(
-        user.id_user,
-        user.token_version
+        raise HTTPException(
+            status_code=401,
+            detail="Identifiants incorrects"
+        )
+
+    # Refuser l'accès aux comptes désactivés.
+    if not user.est_actif:
+        # Conserver une trace de la connexion refusée.
+        create_independent_audit_event(
+            id_user=user.id_user,
+            action="LOGIN_DENIED",
+            module="AUTH",
+            statut="DENIED",
+            details="Tentative de connexion avec un compte desactive"
+        )
+
+        raise HTTPException(
+            status_code=403,
+            detail="Compte desactive"
+        )
+
+    # Générer un jeton JWT pour l'utilisateur authentifié.
+    access_token = create_access_token(
+        user_id=user.id_user,
+        token_version=user.token_version
     )
 
+    # Enregistrer la connexion réussie dans le journal d'audit.
+    # Cette opération concerne tous les rôles de DocuMind.
+    create_audit_event(
+        db=db,
+        id_user=user.id_user,
+        action="LOGIN_SUCCESS",
+        module="AUTH",
+        statut="SUCCESS",
+        details=f"Connexion reussie de l'utilisateur {user.username}"
+    )
+
+    # Valider l'enregistrement de l'événement.
+    db.commit()
+
+    # Retourner le jeton d'authentification au client.
     return {
-        "access_token": token,
+        "access_token": access_token,
         "token_type": "bearer",
         "doit_changer_password": user.doit_changer_password
     }
@@ -114,18 +164,29 @@ def change_password(
             detail="Le nouveau mot de passe doit etre different"
         )
 
-    # Enregistrer le nouveau mot de passe sous forme hachée.
-    current_user.password_hash = hash_password(
-        data.nouveau_password
-    )
-
-    # Supprimer l'obligation de changement du mot de passe.
+    # Enregistrer le nouveau mot de passe sous forme de hash.
+    # Désactiver l'obligation de changement après validation.
+    current_user.password_hash = hash_password(data.nouveau_password)
     current_user.doit_changer_password = False
 
-    # Augmenter la version pour invalider tous les anciens JWT.
+    # Invalider les anciens jetons JWT de l'utilisateur.
     current_user.token_version += 1
 
-    # Enregistrer les modifications dans MySQL.
+    # Journaliser le changement de mot de passe.
+    # Ne jamais enregistrer le mot de passe ni son hash dans l'audit.
+    create_audit_event(
+        db=db,
+        id_user=current_user.id_user,
+        action="PASSWORD_CHANGED",
+        module="AUTH",
+        statut="SUCCESS",
+        details=(
+            f"Changement de mot de passe du compte "
+            f"{current_user.username}"
+        )
+    )
+
+    # Valider le changement et l'événement d'audit ensemble.
     db.commit()
 
     return {
