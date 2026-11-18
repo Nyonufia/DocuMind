@@ -1,4 +1,3 @@
-
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
@@ -103,4 +102,32 @@ def require_admin(
             detail="Acces reserve aux administrateurs"
         )
 
+    return current_user
+
+
+# Vérification des privilèges de gestion documentaire.
+# Seuls les administrateurs et les éditeurs peuvent
+# effectuer les opérations de gestion des collections.
+# Le changement du mot de passe temporaire reste obligatoire.
+
+def require_admin_or_editor(
+    current_user: User = Depends(require_password_changed),
+    db: Session = Depends(get_db)
+):
+    # Importer le modèle Role pour identifier
+    # le rôle attribué à l'utilisateur connecté.
+    from app.models.role import Role
+
+    # Récupérer le rôle depuis la base de données.
+    role = db.get(Role, current_user.id_role)
+
+    # Refuser l'accès si le rôle est inexistant
+    # ou différent des deux rôles autorisés.
+    if role is None or role.intitule not in ("Administrateur", "Éditeur"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acces reserve aux administrateurs et aux editeurs"
+        )
+
+    # Retourner l'utilisateur autorisé.
     return current_user
