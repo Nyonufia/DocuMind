@@ -4,6 +4,12 @@ from app.routers.auth import router as auth_router
 from app.routers.audit import router as audit_router
 from app.routers.users import router as users_router
 from fastapi.middleware.cors import CORSMiddleware
+from app.routers import documents
+
+from app.routers.collections import router as collections_router
+from app.routers import recherche
+from app.routers import feedback
+
 
 app = FastAPI(
     title="DocuMind API",
@@ -32,7 +38,12 @@ app.include_router(auth_router)
 app.include_router(users_router)
 # Ajouter les routes de consultation du journal d'audit.
 app.include_router(audit_router)
+# Enregistrement des routes de gestion des collections documentaires.
+app.include_router(collections_router)
 
+app.include_router(documents.router)
+app.include_router(recherche.router)
+app.include_router(feedback.router)
 @app.get("/")
 def accueil():
     return {

@@ -1,0 +1,2 @@
+DocuMind est un assistant documentaire sécurisé.
+Il permet d'importer des documents et de rechercher des informations.

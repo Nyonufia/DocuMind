@@ -20,6 +20,26 @@ from app.models.role import Role
 from app.security.dependencies import require_password_changed
 
 
+# Vérifier exclusivement le rôle Éditeur pour les attributions.
+# La vérification est réalisée côté backend à partir du rôle en base.
+def require_editor_for_assignments(
+    current_user: User = Depends(require_password_changed),
+    db: Session = Depends(get_db)
+) -> User:
+    role = db.get(Role, current_user.id_role)
+    if role is None or role.intitule != "Éditeur":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Seul un editeur peut attribuer ou retirer un utilisateur d'une collection"
+        )
+    if not current_user.est_actif:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Compte utilisateur desactive"
+        )
+    return current_user
+
+
 # Définition des routes de gestion des collections.
 router = APIRouter(
     prefix="/collections",
@@ -373,8 +393,7 @@ def update_collection_status(
 
 
 # Association d'un utilisateur à une collection.
-# Seuls les administrateurs et les éditeurs
-# peuvent attribuer des collections aux utilisateurs.
+# Seul l'Éditeur peut attribuer des collections aux utilisateurs.
 
 @router.post(
     "/{id_collection}/users/{id_user}",
@@ -383,7 +402,7 @@ def update_collection_status(
 def add_user_to_collection(
     id_collection: int,
     id_user: int,
-    current_user: User = Depends(require_admin_or_editor),
+    current_user: User = Depends(require_editor_for_assignments),
     db: Session = Depends(get_db)
 ):
     # Vérifier que la collection existe.
@@ -577,13 +596,14 @@ def get_user_collections(
     }
 
 # Retrait d'un utilisateur d'une collection.
-# L'utilisateur doit conserver au moins une collection.
+# Seul l'Éditeur peut retirer une attribution.
+# Le retrait de la dernière collection reste autorisé.
 
 @router.delete("/{id_collection}/users/{id_user}")
 def remove_user_from_collection(
     id_collection: int,
     id_user: int,
-    current_user: User = Depends(require_admin_or_editor),
+    current_user: User = Depends(require_editor_for_assignments),
     db: Session = Depends(get_db)
 ):
     # Vérifier l'existence de la collection.
