@@ -198,3 +198,50 @@ def statistiques_feedback(
         "reponses_non_utiles": non_utiles,
         "taux_satisfaction": taux
     }
+
+
+# Consulter toutes les évaluations des réponses RAG.
+# Cette fonctionnalité est réservée à l'administrateur.
+@router.get("")
+def lister_feedbacks(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_password_changed)
+):
+
+    # Vérifier les autorisations administrateur.
+    verifier_administrateur(db, current_user)
+
+    # Récupérer les évaluations les plus récentes.
+    evaluations = db.scalars(
+        select(Feedback)
+        .order_by(
+            Feedback.date_feedback.desc(),
+            Feedback.id_feedback.desc()
+        )
+    ).all()
+
+    # Préparer les informations pour le frontend.
+    feedbacks_list = []
+
+    for feedback in evaluations:
+
+        # Récupérer l'utilisateur ayant soumis l'avis.
+        utilisateur = db.get(User, feedback.id_user)
+
+        feedbacks_list.append({
+            "id_feedback": feedback.id_feedback,
+            "id_answer": feedback.id_answer,
+            "id_user": feedback.id_user,
+            "username": (
+                utilisateur.username
+                if utilisateur else "Utilisateur inconnu"
+            ),
+            "est_utile": feedback.est_utile,
+            "commentaire": feedback.commentaire,
+            "date_feedback": feedback.date_feedback
+        })
+
+    return {
+        "total": len(feedbacks_list),
+        "feedbacks": feedbacks_list
+    }

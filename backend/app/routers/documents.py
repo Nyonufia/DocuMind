@@ -26,7 +26,10 @@ from io import BytesIO
 from urllib.parse import quote
 
 from fastapi.responses import StreamingResponse
+from app.services.audit_service import create_independent_audit_event
 
+from sqlalchemy import func
+from app.models.audit_event import AuditEvent
 
 router = APIRouter(
     prefix="/documents",
@@ -414,6 +417,155 @@ def lister_documents(
         }
         for document in documents
     ]
+
+
+# Enregistrer l'ouverture réelle d'un document.
+# Cette opération est accessible aux utilisateurs autorisés.
+# Les consultations sont conservées dans le journal d'audit.
+@router.post("/{id_document}/consulter")
+def enregistrer_consultation_document(
+    id_document: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_password_changed)
+):
+    """
+    Enregistre la consultation d'un document autorisé
+    dans le journal d'audit centralisé de DocuMind.
+    """
+
+    # Vérifier que le document existe et n'est pas supprimé.
+    document = db.get(Document, id_document)
+
+    if document is None or document.est_supprime:
+        raise HTTPException(
+            status_code=404,
+            detail="Document introuvable."
+        )
+
+    # Vérifier que la collection documentaire est active.
+    collection = db.get(Collection, document.id_collection)
+
+    if collection is None or not collection.est_active:
+        raise HTTPException(
+            status_code=404,
+            detail="Document introuvable."
+        )
+
+    # Vérifier les autorisations de l'utilisateur connecté.
+    if not acces_collection_autorise(
+        db,
+        current_user,
+        document.id_collection
+    ):
+        raise HTTPException(
+            status_code=404,
+            detail="Document introuvable."
+        )
+
+    # Enregistrer la consultation dans le journal d'audit.
+    create_independent_audit_event(
+        id_user=current_user.id_user,
+        action="CONSULTATION_DOCUMENT",
+        module="DOCUMENTS",
+        statut="SUCCES",
+        details=f"id_document={document.id_doc}"
+    )
+
+    return {
+        "message": "Consultation enregistrée avec succès.",
+        "id_document": document.id_doc,
+        "titre": document.titre
+    }
+
+
+# Récupérer les derniers documents réellement consultés
+# par l'utilisateur connecté.
+@router.get("/consultations/recentes")
+def obtenir_documents_recents(
+    limite: int = 3,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_password_changed)
+):
+    """
+    Retourne les derniers documents distincts consultés,
+    uniquement s'ils sont toujours accessibles.
+    """
+
+    # Encadrer le nombre de résultats demandés.
+    if limite < 1 or limite > 20:
+        raise HTTPException(
+            status_code=400,
+            detail="La limite doit être comprise entre 1 et 20."
+        )
+
+    # Lire les consultations réussies de l'utilisateur.
+    evenements = db.scalars(
+        select(AuditEvent)
+        .where(
+            AuditEvent.id_user == current_user.id_user,
+            AuditEvent.action == "CONSULTATION_DOCUMENT",
+            AuditEvent.module == "DOCUMENTS",
+            AuditEvent.statut == "SUCCES"
+        )
+        .order_by(
+            AuditEvent.date_event.desc(),
+            AuditEvent.id_event.desc()
+        )
+    ).all()
+
+    documents_recents = []
+    documents_vus = set()
+
+    for evenement in evenements:
+
+        # Extraire l'identifiant enregistré dans l'audit.
+        try:
+            id_document = int(
+                evenement.details.removeprefix("id_document=")
+            )
+        except (AttributeError, ValueError):
+            continue
+
+        # Éviter de retourner plusieurs fois le même document.
+        if id_document in documents_vus:
+            continue
+
+        documents_vus.add(id_document)
+
+        # Vérifier que le document existe toujours.
+        document = db.get(Document, id_document)
+
+        if document is None or document.est_supprime:
+            continue
+
+        # Vérifier que sa collection est active.
+        collection = db.get(Collection, document.id_collection)
+
+        if collection is None or not collection.est_active:
+            continue
+
+        # Vérifier les autorisations actuelles.
+        if not acces_collection_autorise(
+            db, current_user, document.id_collection
+        ):
+            continue
+
+        documents_recents.append({
+            "id_document": document.id_doc,
+            "titre": document.titre,
+            "type_fichier": document.type_fichier,
+            "id_collection": document.id_collection,
+            "date_consultation": evenement.date_event
+        })
+
+        if len(documents_recents) >= limite:
+            break
+
+    return {
+        "nombre_resultats": len(documents_recents),
+        "documents": documents_recents
+    }
+
 
 
 # Consulter les informations détaillées d'un document.

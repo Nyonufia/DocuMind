@@ -2,22 +2,19 @@
 # La création est réservée aux administrateurs et aux éditeurs.
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, insert, select
 from sqlalchemy.orm import Session
 
 from app.models.collection import Collection
 from app.models.user import User
-from app.schemas.collection import (CollectionCreate, CollectionUpdate, CollectionResponse )
+from app.schemas.collection import CollectionCreate, CollectionUpdate, CollectionResponse
 
-from app.security.dependencies import get_db, require_admin_or_editor
+from app.security.dependencies import get_db, require_admin_or_editor, require_password_changed
 from app.services.audit_service import create_audit_event
 
-from sqlalchemy import insert
 from app.models.user_collection import user_collections
-from sqlalchemy import delete
 
 from app.models.role import Role
-from app.security.dependencies import require_password_changed
 
 
 # Vérifier exclusivement le rôle Éditeur pour les attributions.
@@ -182,6 +179,38 @@ def list_collections(
 
     # Exécuter la requête adaptée au rôle.
     return db.scalars(statement).all()
+
+
+# Consultation des utilisateurs disponibles pour les collections.
+# Seul l'Éditeur peut accéder à cette liste.
+# Aucune information administrative sensible n'est retournée.
+
+@router.get("/utilisateurs-disponibles")
+def list_available_users(
+    current_user: User = Depends(require_editor_for_assignments),
+    db: Session = Depends(get_db)
+):
+    # Récupérer uniquement les utilisateurs actifs.
+    utilisateurs = db.scalars(
+        select(User)
+        .where(User.est_actif.is_(True))
+        .order_by(User.username)
+    ).all()
+
+    # Retourner uniquement les données nécessaires
+    # pour attribuer un accès documentaire.
+    return {
+        "total": len(utilisateurs),
+        "users": [
+            {
+                "id_user": utilisateur.id_user,
+                "username": utilisateur.username,
+                "nom": utilisateur.nom,
+                "prenom": utilisateur.prenom
+            }
+            for utilisateur in utilisateurs
+        ]
+    }
 
 
 # Consultation des informations d'une collection précise.
